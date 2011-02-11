@@ -23,16 +23,17 @@ class ProcBase:
         pass
 
     def done(self):
-        pass
+        if self.cb_queue and self._callback:
+            self.cb_queue.put((self._callback, self))
+        self.done_queue.put(self)
 
     def start(self):
         self._th = threading.Thread(target=self._work)
         self._th.start()
 
 class SubProc(ProcBase):
-    def __init__(self, call, done_queue=None, cb_queue=None, callback=None):
-        super(SubProc, self).__init__(
-                done_queue=done_queue, cb_queue=cb_queue, callback=callback)
+    def __init__(self, call, callback=None, **kwargs):
+        super(SubProc, self).__init__(callback=callback, **kwargs)
         self._inp = None
         self._outp = None
         self._proc = None
@@ -44,23 +45,30 @@ class SubProc(ProcBase):
         self.retcode = None
 
     def _work(self):
-        if self._inp != None:
-            inp = subprocess.PIPE
-        else:
-            inp = None
-        self._proc = subprocess.Popen(self.call, shell=True, stdin=inp,
-            stdout=subprocess.PIPE)
+        try:
+            inp = self._inp or None
+            self._proc = subprocess.Popen(
+                    self.call,
+                    shell=True,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    )
 
-        (self.out, self.err) = self._proc.communicate(self._inp)
-        self.retcode = self._proc.returncode
+            (self.out, self.err) = self._proc.communicate(inp)
+            self.retcode = self._proc.returncode
 
-        if self.cb_queue and self._callback:
-            self.cb_queue.put((self._callback, (self,)))
-        self.done_queue.put(self)
+        finally:
+            self.done()
 
     def kill(self):
         if self._proc and self._proc.returncode is None:
+            print "blah"
+            self._proc.terminate()
             self._proc.kill()
+            print "erg"
+        else:
+            print "woot"
 
     def start(self, inp, context=None):
         self.kill()
@@ -68,16 +76,20 @@ class SubProc(ProcBase):
         self._inp = inp
         super(SubProc, self).start()
 
-    def done(self):
-        pass
-
 class VimProc(SubProc):
-    def __init__(self, call, vim_cb=None):
-        super(VimProc, self).__init__(call, callback=VimProc.vim_call)
-        self._vim_cb = vim_cb
+    def __init__(self, call, vim_cb=None, callback=None, **kwargs):
+        super(VimProc, self).__init__(
+                call,
+                callback=lambda x: self.vim_call(x, vim_cb, callback),
+                **kwargs)
 
-    def vim_call(self):
-        if self._vim_cb:
-            import vim
-            vim.command(self._vim_cb)
+    def vim_call(self, x, vim_cb, cb=None):
+        """ cb is an extra callback. """
+        try:
+            if vim_cb:
+                import vim
+                vim.command(vim_cb)
+        finally:
+            if cb:
+                cb(x)
 
