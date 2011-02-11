@@ -4,6 +4,9 @@
 import threading
 import subprocess
 from abc import *
+import time
+
+POLL_INTERVAL = 0.1
 
 class ProcBase:
     __metaclass__ = ABCMeta
@@ -34,28 +37,31 @@ class ProcBase:
 class SubProc(ProcBase):
     def __init__(self, call, callback=None, **kwargs):
         super(SubProc, self).__init__(callback=callback, **kwargs)
-        self._inp = None
-        self._outp = None
         self._proc = None
+        self._alive = True
 
         self.context = None
         self.call = call
-        self.out = None
-        self.err = None
         self.retcode = None
 
     def _work(self):
         try:
-            inp = self._inp or None
-            self._proc = subprocess.Popen(
-                    self.call,
-                    shell=True,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
+            inp = self._inp
+            self._proc = subprocess.Popen(self.call, shell=True,
+                    stdout=subprocess.PIPE, # squelch output
                     stderr=subprocess.PIPE,
-                    )
+                    stdin=(inp and subprocess.PIPE or None))
 
-            (self.out, self.err) = self._proc.communicate(inp)
+            while self._proc.returncode is None and self._alive:
+                self._proc.poll()
+
+                if inp:
+                    self._proc.stdin.write(inp)
+                    self._proc.stdin.close()
+                    inp = None
+
+                time.sleep(POLL_INTERVAL)
+
             self.retcode = self._proc.returncode
 
         finally:
@@ -63,18 +69,18 @@ class SubProc(ProcBase):
 
     def kill(self):
         if self._proc and self._proc.returncode is None:
-            print "blah"
+            self._alive = False
             self._proc.terminate()
             self._proc.kill()
-            print "erg"
-        else:
-            print "woot"
 
     def start(self, inp, context=None):
         self.kill()
         self.context = context
         self._inp = inp
         super(SubProc, self).start()
+
+    def __str__(self):
+        return "Subprocess: <%s>" % self.call
 
 class VimProc(SubProc):
     def __init__(self, call, vim_cb=None, callback=None, **kwargs):

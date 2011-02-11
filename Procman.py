@@ -4,8 +4,19 @@ import vim
 
 import Async
 
-DEFAULT_INTERVAL = 500
+DEFAULT_INTERVAL = "500"
 INTERVAL_VAR = "g:async_interval"
+REMAKE_AW_VAR = "g:async_remake_autowrite"
+REMAKE_AW_DEFAULT = "0"
+
+def _opt(var, default):
+    if int(vim.eval('exists("%s")' % var)):
+        try:
+            return vim.eval(var)
+        except:
+            return default
+    else:
+        return default
 
 class Maker(object):
     def __init__(self, procman):
@@ -27,11 +38,16 @@ class Maker(object):
 
         return makeprg
 
+    def _remake_aw(self):
+        if int(_opt(REMAKE_AW_VAR, REMAKE_AW_DEFAULT)):
+            vim.command("up")
+
     def _cb_make(self, makeprg):
         if makeprg in self._making:
             self._making.remove(makeprg)
         if makeprg in self._do_remake:
             self._do_remake.remove(makeprg)
+            self._remake_aw()
             self._make(makeprg)
 
     def _make(self, makeprg):
@@ -52,7 +68,7 @@ class Maker(object):
         makeprg = self._makeprg(args, makeprg)
         self._make(makeprg)
 
-    def remake(self, args="", makeprg=None, autowrite=None):
+    def remake(self, args="", makeprg=None):
         """ Attempts to run make if it's not already running, otherwise
         it waits until make finishes and runs it again.
         """
@@ -62,6 +78,7 @@ class Maker(object):
             if makeprg not in self._do_remake:
                 self._do_remake.append(makeprg)
         else:
+            self._remake_aw()
             self._make(makeprg)
 
 class ProcMan(object):
@@ -82,13 +99,7 @@ class ProcMan(object):
 
     @property
     def wait_update(self):
-        if int(vim.eval('exists("%s")' % INTERVAL_VAR)):
-            try:
-                return int(vim.eval(INTERVAL_VAR))
-            except:
-                return DEFAULT_INTERVAL
-        else:
-            return DEFAULT_INTERVAL
+        return int(_opt(INTERVAL_VAR, DEFAULT_INTERVAL))
 
     @property
     def normal_update(self):
@@ -139,7 +150,6 @@ class ProcMan(object):
 
     def end_all(self):
         """ Attempts to kill all active processes. """
-        print "end all"
         for proc in self.procs:
             proc.kill()
 
@@ -183,3 +193,7 @@ class ProcMan(object):
         for au, mode in au_h:
             vim.command('au %s * py PROCS.check("%s")' % (au, mode))
         vim.command('au VimLeavePre,VimLeave * py PROCS.quit()')
+
+    def list_procs(self):
+        for proc in self.procs:
+            print proc
